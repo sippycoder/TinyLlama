@@ -51,7 +51,7 @@ from transformers.utils import (
     replace_return_docstrings,
 )
 from transformers.utils.import_utils import is_torch_fx_available
-from config import MixtralConfig
+from config import MixtralConfig, ShadowCloneManager
 
 
 if is_flash_attn_2_available():
@@ -793,6 +793,7 @@ class MixtralBlockSparseTop2MLP(nn.Module):
         self.ffn_dim = config.intermediate_size
         self.hidden_dim = config.hidden_size
 
+
         self.w1 = nn.Linear(self.hidden_dim, self.ffn_dim, bias=False)
         self.w2 = nn.Linear(self.ffn_dim, self.hidden_dim, bias=False)
         self.w3 = nn.Linear(self.hidden_dim, self.ffn_dim, bias=False)
@@ -811,6 +812,56 @@ class MixtralBLockSparseTop2MLP(MixtralBlockSparseTop2MLP):
             "MixtralBLockSparseTop2MLP is deprecated by MixtralBlockSparseTop2MLP and will be removed in v4.40."
         )
         super().__init__(*args, **kwargs)
+
+
+class ShadowCloneBlockMLP(nn.Module):
+    def __init__(self, config: MixtralConfig):
+        super().__init__()
+        self.ffn_dim = config.intermediate_size
+        self.hidden_dim = config.hidden_size
+
+        self.w1 = nn.Linear(self.hidden_dim, self.ffn_dim, bias=False)
+        self.w2 = nn.Linear(self.ffn_dim, self.hidden_dim, bias=False)
+        self.w3 = nn.Linear(self.hidden_dim, self.ffn_dim, bias=False)
+
+        self.act_fn = ACT2FN[config.hidden_act]
+
+    def forward(self, hidden_states):
+        current_hidden_states = self.act_fn(self.w1(hidden_states)) * self.w3(hidden_states)
+        current_hidden_states = self.w2(current_hidden_states)
+        return current_hidden_states
+
+
+class ShadowCloneBlockSparseTop2MLP(nn.Module):
+    def __init__(self, config: MixtralConfig):
+        super().__init__()
+        self.ffn_dim = config.intermediate_size
+        self.hidden_dim = config.hidden_size
+        self.shadow_clone_mgr: ShadowCloneManager = ShadowCloneManager.get_instance()
+
+        self.w1 = nn.Linear(self.hidden_dim, self.ffn_dim, bias=False)
+        self.w2 = nn.Linear(self.ffn_dim, self.hidden_dim, bias=False)
+        self.w3 = nn.Linear(self.hidden_dim, self.ffn_dim, bias=False)
+
+        self.act_fn = ACT2FN[config.hidden_act]
+
+    def forward(self, hidden_states, row, col):
+        if self.shadow_clone_mgr.current_scale == 0:
+            current_hidden_states = self.act_fn(self.w1(hidden_states)) * self.w3(hidden_states)
+            current_hidden_states = self.w2(current_hidden_states)
+            return current_hidden_states
+        else:
+            resolution = 2 ^ self.shadow_clone_mgr.current_scale
+            row_i = row * self.ffn_dim / resolution
+            row_j = (row + 1) * self.ffn_dim / resolution
+            col_i = col * self.ffn_dim / resolution
+            col_j = (col + 1) * self.ffn_dim / resolution
+
+            hw1 = F.linear(hidden_states, self.w1.weight[:, row_i:row_j])
+            hw3 = F.linear(hidden_states, self.w3.weight[:, row_i:row_j])
+            current_hidden_states = self.act_fn(hw1) * hw3
+            current_hidden_states = F.linear(current_hidden_states, self.w2.weight[:, col_i: col_j])
+            return current_hidden_states
 
 
 class MixtralSparseMoeBlock(nn.Module):
@@ -894,24 +945,39 @@ class ShadowCloneSparseMoeBlock(nn.Module):
     and memory on padding.
     """
 
-    def __init__(self, config):
+    def __init__(self, config: MixtralConfig, resolution: int):
         super().__init__()
         self.hidden_dim = config.hidden_size
         self.ffn_dim = config.intermediate_size
-        self.num_experts = config.num_local_experts
+        self.shadow_clone_mgr = ShadowCloneManager.get_instance()
         self.top_k = config.num_experts_per_tok
 
-        # gating
-        self.gate = nn.Linear(self.hidden_dim, self.num_experts, bias=False)
+        
+        # There are (2 ^ scale) ** 2 experts at a resolution of `scale`
+        # gates[i] refer to gating at resolution of scale i+1
+        self.gates = nn.ModuleList(
+            [
+                nn.Linear(self.hidden_dim, (2 ^ scale) ** 2, bias=False)
+                for scale in range(1, config.num_resolutions)
+            ]
+        )
 
-        self.experts = nn.ModuleList([MixtralBlockSparseTop2MLP(config) for _ in range(self.num_experts)])
+        self.expert_pool = ShadowCloneBlockSparseTop2MLP(config)
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         """ """
+        if self.shadow_clone_mgr.current_scale == 0:
+            # There is only one expert. No gating needed
+            return self.expert_pool(hidden_states), None
+
+        current_scale = self.shadow_clone_mgr.current_scale
+        resolution = 2 ^ current_scale
+        num_experts = resolution ** 2
+
         batch_size, sequence_length, hidden_dim = hidden_states.shape
         hidden_states = hidden_states.view(-1, hidden_dim)
         # router_logits: (batch * sequence_length, n_experts)
-        router_logits = self.gate(hidden_states)
+        router_logits = self.gates[current_scale - 1](hidden_states)
 
         routing_weights = F.softmax(router_logits, dim=1, dtype=torch.float)
         routing_weights, selected_experts = torch.topk(routing_weights, self.top_k, dim=-1)
@@ -925,11 +991,11 @@ class ShadowCloneSparseMoeBlock(nn.Module):
 
         # One hot encode the selected experts to create an expert mask
         # this will be used to easily index which expert is going to be sollicitated
-        expert_mask = torch.nn.functional.one_hot(selected_experts, num_classes=self.num_experts).permute(2, 1, 0)
+        expert_mask = torch.nn.functional.one_hot(selected_experts, num_classes=num_experts).permute(2, 1, 0)
 
         # Loop over all available experts in the model and perform the computation on each expert
-        for expert_idx in range(self.num_experts):
-            expert_layer = self.experts[expert_idx]
+        for expert_idx in range(resolution):
+            grid_x, grid_y = expert_idx / resolution, expert_idx % resolution
             idx, top_x = torch.where(expert_mask[expert_idx])
 
             if top_x.shape[0] == 0:
@@ -943,7 +1009,7 @@ class ShadowCloneSparseMoeBlock(nn.Module):
             # the current expert. We need to make sure to multiply the output hidden
             # states by `routing_weights` on the corresponding tokens (top-1 and top-2)
             current_state = hidden_states[None, top_x_list].reshape(-1, hidden_dim)
-            current_hidden_states = expert_layer(current_state) * routing_weights[top_x_list, idx_list, None]
+            current_hidden_states = self.expert_pool(current_state, grid_x, grid_y) * routing_weights[top_x_list, idx_list, None]
 
             # However `index_add_` only support torch tensors for indexing so we'll use
             # the `top_x` tensor here.
@@ -952,13 +1018,16 @@ class ShadowCloneSparseMoeBlock(nn.Module):
         return final_hidden_states, router_logits
 
 class MixtralDecoderLayer(nn.Module):
-    def __init__(self, config: MixtralConfig, layer_idx: int):
+    def __init__(self, config: MixtralConfig, layer_idx: int, resolution: int):
         super().__init__()
         self.hidden_size = config.hidden_size
 
         self.self_attn = MIXTRAL_ATTENTION_CLASSES[config._attn_implementation](config, layer_idx)
 
-        self.block_sparse_moe = MixtralSparseMoeBlock(config)
+        if resolution == 1:
+            self.block_sparse_moe = ShadowCloneBlockMLP(config)
+        else:
+            self.block_sparse_moe = ShadowCloneSparseMoeBlock(config, resolution)
         self.input_layernorm = MixtralRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.post_attention_layernorm = MixtralRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 

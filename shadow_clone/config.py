@@ -36,6 +36,23 @@ def balanced_split(dim: int, num_experts: int):
     return (math.isqrt(num_experts), math.isqrt(num_experts))
 
 
+class ShadowCloneManager:
+    _instance = None
+
+    def __init__(self):
+        raise RuntimeError("Call get_instance() instead")
+
+    def initialize(self):
+        self.current_scale = 0
+
+    @classmethod
+    def get_instance(cls):
+        if cls._instance is None:
+            cls._instance = cls.__new__(cls)
+            cls._instance.initialize()
+        return cls._instance
+
+
 class MixtralConfig(PretrainedConfig):
     r"""
     This is the configuration class to store the configuration of a [`MixtralModel`]. It is used to instantiate an
@@ -125,7 +142,7 @@ class MixtralConfig(PretrainedConfig):
         self,
         vocab_size=32000,
         hidden_size=4096,
-        intermediate_size=[3584, 7168, 14336],
+        intermediate_size=14336,
         num_hidden_layers=32,
         num_attention_heads=32,
         num_key_value_heads=8,
@@ -142,7 +159,7 @@ class MixtralConfig(PretrainedConfig):
         sliding_window=None,
         attention_dropout=0.0,
         num_experts_per_tok=2,
-        num_local_experts=[16, 4, 1],
+        num_resolutions=8,
         output_router_logits=False,
         router_aux_loss_coef=0.001,
         **kwargs,
@@ -168,9 +185,10 @@ class MixtralConfig(PretrainedConfig):
         self.attention_dropout = attention_dropout
 
         self.num_experts_per_tok = num_experts_per_tok
-        self.num_local_experts = num_local_experts
+        self.num_resolutions = num_resolutions
         self.output_router_logits = output_router_logits
         self.router_aux_loss_coef = router_aux_loss_coef
+
         super().__init__(
             pad_token_id=pad_token_id,
             bos_token_id=bos_token_id,
