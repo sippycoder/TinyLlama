@@ -53,7 +53,7 @@ class ShadowCloneManager:
         return cls._instance
 
 
-class MixtralConfig(PretrainedConfig):
+class ShadowCloneConfig(PretrainedConfig):
     r"""
     This is the configuration class to store the configuration of a [`MixtralModel`]. It is used to instantiate an
     Mixtral model according to the specified arguments, defining the model architecture. Instantiating a configuration
@@ -135,7 +135,7 @@ class MixtralConfig(PretrainedConfig):
     >>> configuration = model.config
     ```"""
 
-    model_type = "mixtral"
+    model_type = "shadow_clone"
     keys_to_ignore_at_inference = ["past_key_values"]
 
     def __init__(

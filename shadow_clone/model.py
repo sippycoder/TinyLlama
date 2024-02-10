@@ -17,7 +17,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" PyTorch Mixtral model."""
+""" PyTorch ShadowClone model."""
 import inspect
 import math
 import warnings
@@ -51,7 +51,7 @@ from transformers.utils import (
     replace_return_docstrings,
 )
 from transformers.utils.import_utils import is_torch_fx_available
-from config import MixtralConfig, ShadowCloneManager
+from config import ShadowCloneConfig, ShadowCloneManager
 
 
 if is_flash_attn_2_available():
@@ -71,7 +71,7 @@ if is_torch_fx_available():
 
 logger = logging.get_logger(__name__)
 
-_CONFIG_FOR_DOC = "MixtralConfig"
+_CONFIG_FOR_DOC = "ShadowCloneConfig"
 
 
 def load_balancing_loss_func(
@@ -163,11 +163,11 @@ def _get_unpad_data(attention_mask):
     )
 
 
-# Copied from transformers.models.llama.modeling_llama.LlamaRMSNorm with Llama->Mixtral
-class MixtralRMSNorm(nn.Module):
+# Copied from transformers.models.llama.modeling_llama.LlamaRMSNorm with Llama->ShadowClone
+class ShadowCloneRMSNorm(nn.Module):
     def __init__(self, hidden_size, eps=1e-6):
         """
-        MixtralRMSNorm is equivalent to T5LayerNorm
+        ShadowCloneRMSNorm is equivalent to T5LayerNorm
         """
         super().__init__()
         self.weight = nn.Parameter(torch.ones(hidden_size))
@@ -181,8 +181,8 @@ class MixtralRMSNorm(nn.Module):
         return self.weight * hidden_states.to(input_dtype)
 
 
-# Copied from transformers.models.llama.modeling_llama.LlamaRotaryEmbedding with Llama->Mixtral
-class MixtralRotaryEmbedding(nn.Module):
+# Copied from transformers.models.llama.modeling_llama.LlamaRotaryEmbedding with Llama->ShadowClone
+class ShadowCloneRotaryEmbedding(nn.Module):
     def __init__(self, dim, max_position_embeddings=2048, base=10000, device=None):
         super().__init__()
 
@@ -268,14 +268,14 @@ def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
     return hidden_states.reshape(batch, num_key_value_heads * n_rep, slen, head_dim)
 
 
-# Copied from transformers.models.mistral.modeling_mistral.MistralAttention with Mistral->Mixtral
-class MixtralAttention(nn.Module):
+# Copied from transformers.models.mistral.modeling_mistral.MistralAttention with Mistral->ShadowClone
+class ShadowCloneAttention(nn.Module):
     """
     Multi-headed attention from 'Attention Is All You Need' paper. Modified to use sliding window attention: Longformer
     and "Generating Long Sequences with Sparse Transformers".
     """
 
-    def __init__(self, config: MixtralConfig, layer_idx: Optional[int] = None):
+    def __init__(self, config: ShadowCloneConfig, layer_idx: Optional[int] = None):
         super().__init__()
         self.config = config
         self.layer_idx = layer_idx
@@ -306,7 +306,7 @@ class MixtralAttention(nn.Module):
         self.v_proj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=False)
         self.o_proj = nn.Linear(self.num_heads * self.head_dim, self.hidden_size, bias=False)
 
-        self.rotary_emb = MixtralRotaryEmbedding(
+        self.rotary_emb = ShadowCloneRotaryEmbedding(
             self.head_dim,
             max_position_embeddings=self.max_position_embeddings,
             base=self.rope_theta,
@@ -397,10 +397,10 @@ class MixtralAttention(nn.Module):
         return attn_output, attn_weights, past_key_value
 
 
-# Copied from transformers.models.mistral.modeling_mistral.MistralFlashAttention2 with Mistral->Mixtral
-class MixtralFlashAttention2(MixtralAttention):
+# Copied from transformers.models.mistral.modeling_mistral.MistralFlashAttention2 with Mistral->ShadowClone
+class ShadowCloneFlashAttention2(ShadowCloneAttention):
     """
-    Mixtral flash attention module. This module inherits from `MixtralAttention` as the weights of the module stays
+    ShadowClone flash attention module. This module inherits from `ShadowCloneAttention` as the weights of the module stays
     untouched. The only required change would be on the forward pass where it needs to correctly call the public API of
     flash attention and deal with padding tokens in case the input contains any of them.
     """
@@ -692,15 +692,15 @@ class MixtralFlashAttention2(MixtralAttention):
         )
 
 
-# Copied from transformers.models.llama.modeling_llama.LlamaSdpaAttention with Llama->Mixtral
-class MixtralSdpaAttention(MixtralAttention):
+# Copied from transformers.models.llama.modeling_llama.LlamaSdpaAttention with Llama->ShadowClone
+class ShadowCloneSdpaAttention(ShadowCloneAttention):
     """
-    Mixtral attention module using torch.nn.functional.scaled_dot_product_attention. This module inherits from
-    `MixtralAttention` as the weights of the module stays untouched. The only changes are on the forward pass to adapt to
+    ShadowClone attention module using torch.nn.functional.scaled_dot_product_attention. This module inherits from
+    `ShadowCloneAttention` as the weights of the module stays untouched. The only changes are on the forward pass to adapt to
     SDPA API.
     """
 
-    # Adapted from MixtralAttention.forward
+    # Adapted from ShadowCloneAttention.forward
     def forward(
         self,
         hidden_states: torch.Tensor,
@@ -713,7 +713,7 @@ class MixtralSdpaAttention(MixtralAttention):
         if output_attentions:
             # TODO: Improve this warning with e.g. `model.config.attn_implementation = "manual"` once this is implemented.
             logger.warning_once(
-                "MixtralModel is using MixtralSdpaAttention, but `torch.nn.functional.scaled_dot_product_attention` does not support `output_attentions=True`. Falling back to the manual attention implementation, "
+                "ShadowCloneModel is using ShadowCloneSdpaAttention, but `torch.nn.functional.scaled_dot_product_attention` does not support `output_attentions=True`. Falling back to the manual attention implementation, "
                 'but specifying the manual implementation will be required from Transformers version v5.0.0 onwards. This warning can be removed using the argument `attn_implementation="eager"` when loading the model.'
             )
             return super().forward(
@@ -781,59 +781,14 @@ class MixtralSdpaAttention(MixtralAttention):
 
 
 MIXTRAL_ATTENTION_CLASSES = {
-    "eager": MixtralAttention,
-    "flash_attention_2": MixtralFlashAttention2,
-    "sdpa": MixtralSdpaAttention,
+    "eager": ShadowCloneAttention,
+    "flash_attention_2": ShadowCloneFlashAttention2,
+    "sdpa": ShadowCloneSdpaAttention,
 }
 
 
-class MixtralBlockSparseTop2MLP(nn.Module):
-    def __init__(self, config: MixtralConfig):
-        super().__init__()
-        self.ffn_dim = config.intermediate_size
-        self.hidden_dim = config.hidden_size
-
-
-        self.w1 = nn.Linear(self.hidden_dim, self.ffn_dim, bias=False)
-        self.w2 = nn.Linear(self.ffn_dim, self.hidden_dim, bias=False)
-        self.w3 = nn.Linear(self.hidden_dim, self.ffn_dim, bias=False)
-
-        self.act_fn = ACT2FN[config.hidden_act]
-
-    def forward(self, hidden_states):
-        current_hidden_states = self.act_fn(self.w1(hidden_states)) * self.w3(hidden_states)
-        current_hidden_states = self.w2(current_hidden_states)
-        return current_hidden_states
-
-
-class MixtralBLockSparseTop2MLP(MixtralBlockSparseTop2MLP):
-    def __init__(self, *args, **kwargs):
-        logger.warning_once(
-            "MixtralBLockSparseTop2MLP is deprecated by MixtralBlockSparseTop2MLP and will be removed in v4.40."
-        )
-        super().__init__(*args, **kwargs)
-
-
-class ShadowCloneBlockMLP(nn.Module):
-    def __init__(self, config: MixtralConfig):
-        super().__init__()
-        self.ffn_dim = config.intermediate_size
-        self.hidden_dim = config.hidden_size
-
-        self.w1 = nn.Linear(self.hidden_dim, self.ffn_dim, bias=False)
-        self.w2 = nn.Linear(self.ffn_dim, self.hidden_dim, bias=False)
-        self.w3 = nn.Linear(self.hidden_dim, self.ffn_dim, bias=False)
-
-        self.act_fn = ACT2FN[config.hidden_act]
-
-    def forward(self, hidden_states):
-        current_hidden_states = self.act_fn(self.w1(hidden_states)) * self.w3(hidden_states)
-        current_hidden_states = self.w2(current_hidden_states)
-        return current_hidden_states
-
-
 class ShadowCloneBlockSparseTop2MLP(nn.Module):
-    def __init__(self, config: MixtralConfig):
+    def __init__(self, config: ShadowCloneConfig):
         super().__init__()
         self.ffn_dim = config.intermediate_size
         self.hidden_dim = config.hidden_size
@@ -845,26 +800,26 @@ class ShadowCloneBlockSparseTop2MLP(nn.Module):
 
         self.act_fn = ACT2FN[config.hidden_act]
 
-    def forward(self, hidden_states, row, col):
+    def forward(self, hidden_states, row=0, col=0):
         if self.shadow_clone_mgr.current_scale == 0:
             current_hidden_states = self.act_fn(self.w1(hidden_states)) * self.w3(hidden_states)
             current_hidden_states = self.w2(current_hidden_states)
             return current_hidden_states
         else:
-            resolution = 2 ^ self.shadow_clone_mgr.current_scale
-            row_i = row * self.ffn_dim / resolution
-            row_j = (row + 1) * self.ffn_dim / resolution
-            col_i = col * self.ffn_dim / resolution
-            col_j = (col + 1) * self.ffn_dim / resolution
+            resolution = 2 ** self.shadow_clone_mgr.current_scale
+            row_i = row * self.ffn_dim // resolution
+            row_j = (row + 1) * self.ffn_dim // resolution
+            col_i = col * self.ffn_dim // resolution
+            col_j = (col + 1) * self.ffn_dim // resolution
 
-            hw1 = F.linear(hidden_states, self.w1.weight[:, row_i:row_j])
-            hw3 = F.linear(hidden_states, self.w3.weight[:, row_i:row_j])
+            hw1 = F.linear(hidden_states, self.w1.weight[row_i:row_j, :])
+            hw3 = F.linear(hidden_states, self.w3.weight[row_i:row_j, :])
             current_hidden_states = self.act_fn(hw1) * hw3
             current_hidden_states = F.linear(current_hidden_states, self.w2.weight[:, col_i: col_j])
             return current_hidden_states
 
 
-class MixtralSparseMoeBlock(nn.Module):
+class ShadowCloneSparseMoeBlock(nn.Module):
     """
     This implementation is
     strictly equivalent to standard MoE with full capacity (no
@@ -886,7 +841,7 @@ class MixtralSparseMoeBlock(nn.Module):
         # gating
         self.gate = nn.Linear(self.hidden_dim, self.num_experts, bias=False)
 
-        self.experts = nn.ModuleList([MixtralBlockSparseTop2MLP(config) for _ in range(self.num_experts)])
+        self.experts = nn.ModuleList([ShadowCloneBlockSparseTop2MLP(config) for _ in range(self.num_experts)])
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         """ """
@@ -945,7 +900,7 @@ class ShadowCloneSparseMoeBlock(nn.Module):
     and memory on padding.
     """
 
-    def __init__(self, config: MixtralConfig, resolution: int):
+    def __init__(self, config: ShadowCloneConfig):
         super().__init__()
         self.hidden_dim = config.hidden_size
         self.ffn_dim = config.intermediate_size
@@ -953,11 +908,11 @@ class ShadowCloneSparseMoeBlock(nn.Module):
         self.top_k = config.num_experts_per_tok
 
         
-        # There are (2 ^ scale) ** 2 experts at a resolution of `scale`
+        # There are (2 ** scale) ** 2 experts at a resolution of `scale`
         # gates[i] refer to gating at resolution of scale i+1
         self.gates = nn.ModuleList(
             [
-                nn.Linear(self.hidden_dim, (2 ^ scale) ** 2, bias=False)
+                nn.Linear(self.hidden_dim, (2 ** scale) ** 2, bias=False)
                 for scale in range(1, config.num_resolutions)
             ]
         )
@@ -971,7 +926,7 @@ class ShadowCloneSparseMoeBlock(nn.Module):
             return self.expert_pool(hidden_states), None
 
         current_scale = self.shadow_clone_mgr.current_scale
-        resolution = 2 ^ current_scale
+        resolution = 2 ** current_scale
         num_experts = resolution ** 2
 
         batch_size, sequence_length, hidden_dim = hidden_states.shape
@@ -994,8 +949,8 @@ class ShadowCloneSparseMoeBlock(nn.Module):
         expert_mask = torch.nn.functional.one_hot(selected_experts, num_classes=num_experts).permute(2, 1, 0)
 
         # Loop over all available experts in the model and perform the computation on each expert
-        for expert_idx in range(resolution):
-            grid_x, grid_y = expert_idx / resolution, expert_idx % resolution
+        for expert_idx in range(num_experts):
+            grid_x, grid_y = expert_idx // resolution, expert_idx % resolution
             idx, top_x = torch.where(expert_mask[expert_idx])
 
             if top_x.shape[0] == 0:
@@ -1017,19 +972,16 @@ class ShadowCloneSparseMoeBlock(nn.Module):
         final_hidden_states = final_hidden_states.reshape(batch_size, sequence_length, hidden_dim)
         return final_hidden_states, router_logits
 
-class MixtralDecoderLayer(nn.Module):
-    def __init__(self, config: MixtralConfig, layer_idx: int, resolution: int):
+class ShadowCloneDecoderLayer(nn.Module):
+    def __init__(self, config: ShadowCloneConfig, layer_idx: int):
         super().__init__()
         self.hidden_size = config.hidden_size
 
         self.self_attn = MIXTRAL_ATTENTION_CLASSES[config._attn_implementation](config, layer_idx)
 
-        if resolution == 1:
-            self.block_sparse_moe = ShadowCloneBlockMLP(config)
-        else:
-            self.block_sparse_moe = ShadowCloneSparseMoeBlock(config, resolution)
-        self.input_layernorm = MixtralRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
-        self.post_attention_layernorm = MixtralRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.block_sparse_moe = ShadowCloneSparseMoeBlock(config)
+        self.input_layernorm = ShadowCloneRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.post_attention_layernorm = ShadowCloneRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
     def forward(
         self,
@@ -1108,7 +1060,7 @@ MIXTRAL_START_DOCSTRING = r"""
     and behavior.
 
     Parameters:
-        config ([`MixtralConfig`]):
+        config ([`ShadowCloneConfig`]):
             Model configuration class with all the parameters of the model. Initializing with a config file does not
             load the weights associated with the model, only the configuration. Check out the
             [`~PreTrainedModel.from_pretrained`] method to load the model weights.
@@ -1116,15 +1068,15 @@ MIXTRAL_START_DOCSTRING = r"""
 
 
 @add_start_docstrings(
-    "The bare Mixtral Model outputting raw hidden-states without any specific head on top.",
+    "The bare ShadowClone Model outputting raw hidden-states without any specific head on top.",
     MIXTRAL_START_DOCSTRING,
 )
-# Copied from transformers.models.mistral.modeling_mistral.MistralPreTrainedModel with Mistral->Mixtral
-class MixtralPreTrainedModel(PreTrainedModel):
-    config_class = MixtralConfig
+# Copied from transformers.models.mistral.modeling_mistral.MistralPreTrainedModel with Mistral->ShadowClone
+class ShadowClonePreTrainedModel(PreTrainedModel):
+    config_class = ShadowCloneConfig
     base_model_prefix = "model"
     supports_gradient_checkpointing = True
-    _no_split_modules = ["MixtralDecoderLayer"]
+    _no_split_modules = ["ShadowCloneDecoderLayer"]
     _skip_keys_device_placement = "past_key_values"
     _supports_flash_attn_2 = True
     _supports_sdpa = True
@@ -1210,29 +1162,29 @@ MIXTRAL_INPUTS_DOCSTRING = r"""
 
 
 @add_start_docstrings(
-    "The bare Mixtral Model outputting raw hidden-states without any specific head on top.",
+    "The bare ShadowClone Model outputting raw hidden-states without any specific head on top.",
     MIXTRAL_START_DOCSTRING,
 )
-# Copied from transformers.models.mistral.modeling_mistral.MistralModel with MISTRAL->MIXTRAL,Mistral->Mixtral
-class MixtralModel(MixtralPreTrainedModel):
+# Copied from transformers.models.mistral.modeling_mistral.MistralModel with MISTRAL->MIXTRAL,Mistral->ShadowClone
+class ShadowCloneModel(ShadowClonePreTrainedModel):
     """
-    Transformer decoder consisting of *config.num_hidden_layers* layers. Each layer is a [`MixtralDecoderLayer`]
+    Transformer decoder consisting of *config.num_hidden_layers* layers. Each layer is a [`ShadowCloneDecoderLayer`]
 
     Args:
-        config: MixtralConfig
+        config: ShadowCloneConfig
     """
 
-    def __init__(self, config: MixtralConfig):
+    def __init__(self, config: ShadowCloneConfig):
         super().__init__(config)
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
 
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, self.padding_idx)
         self.layers = nn.ModuleList(
-            [MixtralDecoderLayer(config, layer_idx) for layer_idx in range(config.num_hidden_layers)]
+            [ShadowCloneDecoderLayer(config, layer_idx) for layer_idx in range(config.num_hidden_layers)]
         )
         self._attn_implementation = config._attn_implementation
-        self.norm = MixtralRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.norm = ShadowCloneRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
         self.gradient_checkpointing = False
         # Initialize weights and apply final processing
@@ -1312,7 +1264,7 @@ class MixtralModel(MixtralPreTrainedModel):
             if is_padding_right:
                 raise ValueError(
                     "You are attempting to perform batched generation with padding_side='right'"
-                    " this may lead to unexpected behaviour for Flash Attention version of Mixtral. Make sure to "
+                    " this may lead to unexpected behaviour for Flash Attention version of ShadowClone. Make sure to "
                     " call `tokenizer.padding_side  = 'left'` before tokenizing the input. "
                 )
 
@@ -1408,16 +1360,17 @@ class MixtralModel(MixtralPreTrainedModel):
         )
 
 
-class MixtralForCausalLM(MixtralPreTrainedModel):
+class ShadowCloneForCausalLM(ShadowClonePreTrainedModel):
     _tied_weights_keys = ["lm_head.weight"]
 
     def __init__(self, config):
         super().__init__(config)
-        self.model = MixtralModel(config)
+        self.model = ShadowCloneModel(config)
         self.vocab_size = config.vocab_size
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
         self.router_aux_loss_coef = config.router_aux_loss_coef
-        self.num_experts = config.num_local_experts
+        self.num_resolutions = config.num_resolutions
+        self.shadow_clone_mgr = ShadowCloneManager.get_instance()
         self.num_experts_per_tok = config.num_experts_per_tok
         # Initialize weights and apply final processing
         self.post_init()
@@ -1469,10 +1422,10 @@ class MixtralForCausalLM(MixtralPreTrainedModel):
         Example:
 
         ```python
-        >>> from transformers import AutoTokenizer, MixtralForCausalLM
+        >>> from transformers import AutoTokenizer, ShadowCloneForCausalLM
 
-        >>> model = MixtralForCausalLM.from_pretrained("mistralai/Mixtral-8x7B-v0.1")
-        >>> tokenizer = AutoTokenizer.from_pretrained("mistralai/Mixtral-8x7B-v0.1")
+        >>> model = ShadowCloneForCausalLM.from_pretrained("mistralai/ShadowClone-8x7B-v0.1")
+        >>> tokenizer = AutoTokenizer.from_pretrained("mistralai/ShadowClone-8x7B-v0.1")
 
         >>> prompt = "Hey, are you conscious? Can you talk to me?"
         >>> inputs = tokenizer(prompt, return_tensors="pt")
@@ -1525,15 +1478,19 @@ class MixtralForCausalLM(MixtralPreTrainedModel):
             loss = loss_fct(shift_logits, shift_labels)
 
         aux_loss = None
+        num_experts = (2 ** self.shadow_clone_mgr.current_scale) ** 2
         if output_router_logits:
-            aux_loss = load_balancing_loss_func(
-                outputs.router_logits if return_dict else outputs[-1],
-                self.num_experts,
-                self.num_experts_per_tok,
-                attention_mask,
-            )
-            if labels is not None:
-                loss += self.router_aux_loss_coef * aux_loss.to(loss.device)  # make sure to reside in the same device
+            if num_experts == 1:
+                aux_loss = 0
+            else:
+                aux_loss = load_balancing_loss_func(
+                    outputs.router_logits if return_dict else outputs[-1],
+                    num_experts,
+                    self.num_experts_per_tok,
+                    attention_mask,
+                )
+                if labels is not None:
+                    loss += self.router_aux_loss_coef * aux_loss.to(loss.device)  # make sure to reside in the same device
 
         if not return_dict:
             output = (logits,) + outputs[1:]
@@ -1620,9 +1577,9 @@ class MixtralForCausalLM(MixtralPreTrainedModel):
 
 @add_start_docstrings(
     """
-    The Mixtral Model transformer with a sequence classification head on top (linear layer).
+    The ShadowClone Model transformer with a sequence classification head on top (linear layer).
 
-    [`MixtralForSequenceClassification`] uses the last token in order to do the classification, as other causal models
+    [`ShadowCloneForSequenceClassification`] uses the last token in order to do the classification, as other causal models
     (e.g. GPT-2) do.
 
     Since it does classification on the last token, it requires to know the position of the last token. If a
@@ -1633,12 +1590,12 @@ class MixtralForCausalLM(MixtralPreTrainedModel):
     """,
     MIXTRAL_START_DOCSTRING,
 )
-# Copied from transformers.models.llama.modeling_llama.LlamaForSequenceClassification with Llama->Mixtral, LLAMA->MIXTRAL
-class MixtralForSequenceClassification(MixtralPreTrainedModel):
+# Copied from transformers.models.llama.modeling_llama.LlamaForSequenceClassification with Llama->ShadowClone, LLAMA->MIXTRAL
+class ShadowCloneForSequenceClassification(ShadowClonePreTrainedModel):
     def __init__(self, config):
         super().__init__(config)
         self.num_labels = config.num_labels
-        self.model = MixtralModel(config)
+        self.model = ShadowCloneModel(config)
         self.score = nn.Linear(config.hidden_size, self.num_labels, bias=False)
 
         # Initialize weights and apply final processing
